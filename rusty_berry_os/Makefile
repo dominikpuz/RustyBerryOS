@@ -12,7 +12,7 @@ TARGET            = aarch64-unknown-none-softfloat
 KERNEL_BIN        = kernel8.img
 QEMU_BINARY       = qemu-system-aarch64
 QEMU_MACHINE_TYPE = raspi3b
-QEMU_RELEASE_ARGS = -d in_asm -display none
+QEMU_RELEASE_ARGS = -serial stdio -display none
 OBJDUMP_BINARY    = aarch64-none-elf-objdump
 NM_BINARY         = aarch64-none-elf-nm
 READELF_BINARY    = aarch64-none-elf-readelf
@@ -63,6 +63,7 @@ EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 ##--------------------------------------------------------------
 DOCKER_CMD          = docker run -t --rm -v $(shell pwd):/work/os -w /work/os
 DOCKER_CMD_INTERACT = $(DOCKER_CMD) -i
+DOCKER_ARG_DIR_COMMON = -v $(shell pwd)../common:/work/common
 
 # docker image is defined in common/docker.mk
 DOCKER_QEMU  = $(DOCKER_CMD_INTERACT) $(DOCKER_IMAGE)
