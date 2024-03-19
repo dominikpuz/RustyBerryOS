@@ -2,7 +2,20 @@
 name = "rusty_berry_os"
 version = "0.1.0"
 edition = "2021"
+authors = [
+  "Patryk Zajdel <zajdel0202@gmail.com>",
+  "Dominik Puz",
+]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+bsp_rpi3 = []
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
 
 [dependencies]
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+aarch64-cpu = { version = "9.x.x" }
