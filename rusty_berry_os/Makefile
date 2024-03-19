@@ -3,6 +3,7 @@
 ##--------------------------------------------------------------
 include common/operating_system.mk
 include common/format.mk
+include common/docker.mk
 
 BSP ?= rpi3
 QEMU_MISSING_STRING = "This board is not yet supported for QEMU."
@@ -56,6 +57,17 @@ OBJCOPY_CMD = rust-objcopy \
     -O binary
 
 EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
+
+##--------------------------------------------------------------
+## Docker
+##--------------------------------------------------------------
+DOCKER_CMD          = docker run -t --rm -v $(shell pwd):/work/os -w /work/os
+DOCKER_CMD_INTERACT = $(DOCKER_CMD) -i
+
+# docker image is defined in common/docker.mk
+DOCKER_QEMU  = $(DOCKER_CMD_INTERACT) $(DOCKER_IMAGE)
+DOCKER_TOOLS = $(DOCKER_CMD) $(DOCKER_IMAGE)
+
 
 ##--------------------------------------------------------------
 ## Targets
@@ -124,3 +136,26 @@ clippy:
 clean:
 	rm -rf target $(KERNEL_BIN)
 
+##--------------------------------------------------------------
+## Run readelf
+##--------------------------------------------------------------
+readelf: $(KERNEL_ELF)
+	$(call color_header, "Launching readelf")
+	@$(DOCKER_TOOLS) $(READELF_BINARY) --headers $(KERNEL_ELF)
+
+##--------------------------------------------------------------
+## Run objdump
+##--------------------------------------------------------------
+objdump: $(KERNEL_ELF)
+	$(call color_header, "Launching objdump")
+	@$(DOCKER_TOOLS) $(OBJDUMP_BINARY) --disassemble --demangle \
+                --section .text   \
+                --section .rodata \
+                $(KERNEL_ELF) | rustfilt
+
+##--------------------------------------------------------------
+## Run nm
+##--------------------------------------------------------------
+nm: $(KERNEL_ELF)
+	$(call color_header, "Launching nm")
+	@$(DOCKER_TOOLS) $(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort | rustfilt
