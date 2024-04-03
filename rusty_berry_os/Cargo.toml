@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = [
   "Patryk Zajdel <zajdel0202@gmail.com>",
-  "Dominik Puz",
+  "Dominik Puz <dominikus.puz@gmail.com>",
 ]
 
 [features]
