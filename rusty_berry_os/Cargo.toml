@@ -9,13 +9,14 @@ authors = [
 
 [features]
 default = []
-bsp_rpi3 = []
+bsp_rpi3 = ["tock-registers"]
 
 [[bin]]
 name = "kernel"
 path = "src/main.rs"
 
 [dependencies]
+tock-registers = { version = "0.9.0", default-features = false, features = ["register_types"], optional = true }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 aarch64-cpu = { version = "9.x.x" }
