@@ -4,6 +4,8 @@
 #![feature(format_args_nl)]
 #![feature(panic_info_message)]
 #![feature(trait_alias)]
+#![feature(unchecked_math)]
+#![feature(const_option)]
 #![no_main]
 #![no_std]
 
@@ -14,6 +16,7 @@ mod print;
 mod synchronization;
 mod driver;
 mod console;
+mod time;
 
 unsafe fn kernel_init() -> ! {
     // Initialize the BSP driver subsystem.
@@ -33,17 +36,23 @@ unsafe fn kernel_init() -> ! {
 fn kernel_main() -> ! {
     use console::console;
 
-    println!("[1] Booting on: {}", bsp::board_name());
+    info!("[1] Booting on: {}", bsp::board_name());
+    info!(
+        "Architectural timer resolution: {} ns",
+        time::time_manager().resolution().as_nanos()
+    );
 
-    println!("[2] Drivers loaded:");
+    info!("[2] Drivers loaded:");
     driver::driver_manager().enumerate();
 
-    println!("[3] Chars written: {}", console().chars_written());
-    println!("[4] Echoing input now");
+    info!("[3] Chars written: {}", console().chars_written());
+    info!("[4] Echoing input now");
 
     // Discard any spurious received characters before going into echo mode.
     console().clear_rx();
     loop {
+        // info!("Spinning for 1 second");
+        // time::time_manager().spin_for(Duration::from_secs(1));
         let c = console().read_char();
         print!("{}", c);
     }
