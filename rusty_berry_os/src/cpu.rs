@@ -7,4 +7,4 @@ mod arch_cpu;
 mod boot;
 
 // Re-export the `arch_cpu` functions and types.
-pub use arch_cpu::wait_forever;
+pub use arch_cpu::{nop, wait_forever};
