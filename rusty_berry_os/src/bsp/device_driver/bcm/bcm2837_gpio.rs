@@ -77,9 +77,7 @@ register_structs! {
         (0x08 => _reserved2),
         (0x94 => GPPUD: ReadWrite<u32, GPPUD::Register>),
         (0x98 => GPPUDCLK0: ReadWrite<u32, GPPUDCLK0::Register>),
-        (0x9C => _reserved3),
-        (0xE4 => GPIO_PUP_PDN_CNTRL_REG0: ReadWrite<u32, GPIO_PUP_PDN_CNTRL_REG0::Register>),
-        (0xE8 => @END),
+        (0x9C => @END),
     }
 }
 
