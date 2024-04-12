@@ -35,6 +35,7 @@ unsafe fn kernel_init() -> ! {
 /// The main function running after init.
 fn kernel_main() -> ! {
     use console::console;
+    use core::time::Duration;
 
     info!("[1] Booting on: {}", bsp::board_name());
     info!(
@@ -45,14 +46,15 @@ fn kernel_main() -> ! {
     info!("[2] Drivers loaded:");
     driver::driver_manager().enumerate();
 
+    info!("Spinning for 1 second");
+    time::time_manager().spin_for(Duration::from_secs(1));
+
     info!("[3] Chars written: {}", console().chars_written());
     info!("[4] Echoing input now");
 
     // Discard any spurious received characters before going into echo mode.
     console().clear_rx();
     loop {
-        // info!("Spinning for 1 second");
-        // time::time_manager().spin_for(Duration::from_secs(1));
         let c = console().read_char();
         print!("{}", c);
     }
