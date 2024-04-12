@@ -18,7 +18,6 @@ use tock_registers::{
 //
 // Descriptions taken from
 // - https://github.com/raspberrypi/documentation/files/1888662/BCM2837-ARM-Peripherals.-.Revised.-.V2-1.pdf
-// - https://datasheets.raspberrypi.org/bcm2711/bcm2711-peripherals.pdf
 register_bitfields! {
     u32,
 
@@ -66,23 +65,6 @@ register_bitfields! {
         PUDCLK14 OFFSET(14) NUMBITS(1) [
             NoEffect = 0,
             AssertClock = 1
-        ]
-    ],
-
-    /// GPIO Pull-up / Pull-down Register 0
-    ///
-    /// BCM2711 only.
-    GPIO_PUP_PDN_CNTRL_REG0 [
-        /// Pin 15
-        GPIO_PUP_PDN_CNTRL15 OFFSET(30) NUMBITS(2) [
-            NoResistor = 0b00,
-            PullUp = 0b01
-        ],
-
-        /// Pin 14
-        GPIO_PUP_PDN_CNTRL14 OFFSET(28) NUMBITS(2) [
-            NoResistor = 0b00,
-            PullUp = 0b01
         ]
     ]
 }
@@ -142,7 +124,7 @@ impl GPIOInner {
         // Make an educated guess for a good delay value (Sequence described in the BCM2837
         // peripherals PDF).
         //
-        // - According to Wikipedia, the fastest RPi4 clocks around 1.5 GHz.
+        // - According to Wikipedia, the fastest RPi3 clocks around 1.4 GHz.
         // - The Linux 2837 GPIO driver waits 1 µs between the steps.
         //
         // So lets try to be on the safe side and default to 2000 cycles, which would equal 1 µs
@@ -163,14 +145,6 @@ impl GPIOInner {
         self.registers.GPPUDCLK0.set(0);
     }
 
-    /// Disable pull-up/down on pins 14 and 15.
-    #[cfg(feature = "bsp_rpi4")]
-    fn disable_pud_14_15_bcm2711(&mut self) {
-        self.registers.GPIO_PUP_PDN_CNTRL_REG0.write(
-            GPIO_PUP_PDN_CNTRL_REG0::GPIO_PUP_PDN_CNTRL15::PullUp
-                + GPIO_PUP_PDN_CNTRL_REG0::GPIO_PUP_PDN_CNTRL14::PullUp,
-        );
-    }
 
     /// Map PL011 UART as standard output.
     ///
@@ -185,9 +159,6 @@ impl GPIOInner {
         // Disable pull-up/down on pins 14 and 15.
         #[cfg(feature = "bsp_rpi3")]
         self.disable_pud_14_15_bcm2837();
-
-        #[cfg(feature = "bsp_rpi4")]
-        self.disable_pud_14_15_bcm2711();
     }
 }
 
