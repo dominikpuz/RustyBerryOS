@@ -11,6 +11,18 @@
 	add	\register, \register, #:lo12:\symbol
 .endm
 
+// Load the address of a symbol into a register, absolute.
+//
+// # Resources
+//
+// - https://sourceware.org/binutils/docs-2.36/as/AArch64_002dRelocations.html
+.macro ADR_ABS register, symbol
+	movz	\register, #:abs_g2:\symbol
+	movk	\register, #:abs_g1_nc:\symbol
+	movk	\register, #:abs_g0_nc:\symbol
+.endm
+
+
 // ---------------
 // Public code 
 // ---------------
@@ -29,17 +41,29 @@ _start:
 
 
 	// Initialize DRAM.
-	ADR_REL	x0, __bss_start
-	ADR_REL x1, __bss_end_exclusive 
+	ADR_ABS	x0, __bss_start
+	ADR_ABS x1, __bss_end_exclusive
 
 .bss_init_loop:
     cmp	x0, x1
-    b.eq   .prepare_rust_kernel
+    b.eq	.L_relocate_binary
     stp    xzr, xzr, [x0], #16
     b	.bss_init_loop
 
-.prepare_rust_kernel:
-    ADR_REL x0, __boot_core_stack_end_exclusive
+	// Next, relocate the binary.
+.L_relocate_binary:
+	ADR_REL	x0, __binary_nonzero_start         // The address the binary got loaded to.
+	ADR_ABS	x1, __binary_nonzero_start         // The address the binary was linked to.
+	ADR_ABS	x2, __binary_nonzero_end_exclusive
+
+.L_copy_loop:
+	ldr	x3, [x0], #8
+	str	x3, [x1], #8
+	cmp	x1, x2
+	b.lo	.L_copy_loop
+
+
+    ADR_ABS x0, __boot_core_stack_end_exclusive
     mov sp, x0 // Set the stack pointer
 
     // Read the CPU's timer counter frequency and store it in ARCH_TIMER_COUNTER_FREQUENCY.
@@ -51,7 +75,8 @@ _start:
     str	w2, [x1]
 
     // Call the Rust code
-    b _start_rust
+    ADR_ABS x1, _start_rust
+    br x1
 
 .parking_loop:
   	wfe // inf while wait for event

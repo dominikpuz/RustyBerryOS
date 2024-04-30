@@ -1,9 +1,6 @@
 //! Driver support
 
-use crate::{
-    println,
-    synchronization::{interface::Mutex, NullLock},
-};
+use crate::synchronization::{interface::Mutex, NullLock};
 
 //--------------------------------------------------------------------------------------------------
 // Private Definitions
@@ -148,16 +145,6 @@ impl DriverManager {
                     );
                 }
             }
-        });
-    }
-
-    /// Enumerate all registered device drivers.
-    pub fn enumerate(&self) {
-        let mut i: usize = 1;
-        self.for_each_descriptor(|descriptor| {
-            println!("      {}. {}", i, descriptor.device_driver.compatible());
-
-            i += 1;
         });
     }
 }
