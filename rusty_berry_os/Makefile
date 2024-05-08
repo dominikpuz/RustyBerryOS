@@ -18,7 +18,6 @@ NM_BINARY              = aarch64-none-elf-nm
 READELF_BINARY         = aarch64-none-elf-readelf
 LD_SCRIPT_PATH         = $(shell pwd)/src/bsp/raspberrypi
 RUSTC_MISC_ARGS        = -C target-cpu=cortex-a53
-CHAINBOOT_DEMO_PAYLOAD = demo_payload_rpi3.img
 
 # Export for build.rs.
 export LD_SCRIPT_PATH
@@ -61,7 +60,6 @@ OBJCOPY_CMD = rust-objcopy \
     -O binary
 
 EXEC_QEMU          = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
-EXEC_TEST_MINIPUSH = ruby tests/chainboot_test.rb
 EXEC_MINIPUSH      = ruby common/serial/minipush.rb
 
 ##------------------------------------------------------------------------------
@@ -131,7 +129,7 @@ doc:
 ##------------------------------------------------------------------------------
 ifeq ($(QEMU_MACHINE_TYPE),) # QEMU is not supported for the board.
 
-qemu qemuasm:
+qemu:
 	$(call color_header, "$(QEMU_MISSING_STRING)")
 
 else # QEMU is supported.
@@ -140,17 +138,13 @@ qemu: $(KERNEL_BIN)
 	$(call color_header, "Launching QEMU")
 	@$(DOCKER_QEMU) $(EXEC_QEMU) $(QEMU_RELEASE_ARGS) -kernel $(KERNEL_BIN)
 
-qemuasm: $(KERNEL_BIN)
-	$(call color_header, "Launching QEMU with ASM output")
-	@$(DOCKER_QEMU) $(EXEC_QEMU) $(QEMU_RELEASE_ARGS) -kernel $(KERNEL_BIN) -d in_asm
-
 endif
 
 ##------------------------------------------------------------------------------
 ## Push the kernel to the real HW target
 ##------------------------------------------------------------------------------
 chainboot: $(KERNEL_BIN)
-	@$(DOCKER_CHAINBOOT) $(EXEC_MINIPUSH) $(DEV_SERIAL) $(CHAINBOOT_DEMO_PAYLOAD)
+	@$(DOCKER_CHAINBOOT) $(EXEC_MINIPUSH) $(DEV_SERIAL) $(KERNEL_BIN)
 
 ##------------------------------------------------------------------------------
 ## Run clippy
@@ -188,28 +182,3 @@ nm: $(KERNEL_ELF)
 	$(call color_header, "Launching nm")
 	@$(DOCKER_TOOLS) $(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort | rustfilt
 
-
-
-##--------------------------------------------------------------------------------------------------
-## Testing targets
-##--------------------------------------------------------------------------------------------------
-.PHONY: test test_boot
-
-ifeq ($(QEMU_MACHINE_TYPE),) # QEMU is not supported for the board.
-
-test_boot test:
-	$(call color_header, "$(QEMU_MISSING_STRING)")
-
-else # QEMU is supported.
-
-##------------------------------------------------------------------------------
-## Run boot test
-##------------------------------------------------------------------------------
-test_boot: $(KERNEL_BIN)
-	$(call color_header, "Boot test - $(BSP)")
-	@$(DOCKER_TEST) $(EXEC_TEST_MINIPUSH) $(EXEC_QEMU) $(QEMU_RELEASE_ARGS) \
-		-kernel $(KERNEL_BIN) $(CHAINBOOT_DEMO_PAYLOAD)
-
-test: test_boot
-
-endif
