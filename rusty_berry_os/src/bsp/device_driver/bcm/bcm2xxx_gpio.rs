@@ -113,7 +113,7 @@ struct GPIOInner {
 //--------------------------------------------------------------------------------------------------
 
 /// Representation of the GPIO HW.
-pub struct GPIO {
+pub struct Gpio {
     inner: NullLock<GPIOInner>,
 }
 
@@ -195,7 +195,7 @@ impl GPIOInner {
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
-impl GPIO {
+impl Gpio {
     pub const COMPATIBLE: &'static str = "BCM GPIO";
 
     /// Create an instance.
@@ -220,7 +220,7 @@ impl GPIO {
 //------------------------------------------------------------------------------
 use synchronization::interface::Mutex;
 
-impl driver::interface::DeviceDriver for GPIO {
+impl driver::interface::DeviceDriver for Gpio {
     fn compatible(&self) -> &'static str {
         Self::COMPATIBLE
     }
