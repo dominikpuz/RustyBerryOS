@@ -1,3 +1,4 @@
+
 //! GPIO Driver.
 
 use crate::{
@@ -113,7 +114,7 @@ struct GPIOInner {
 //--------------------------------------------------------------------------------------------------
 
 /// Representation of the GPIO HW.
-pub struct Gpio {
+pub struct GPIO {
     inner: NullLock<GPIOInner>,
 }
 
@@ -138,15 +139,6 @@ impl GPIOInner {
     fn disable_pud_14_15_bcm2837(&mut self) {
         use crate::time;
         use core::time::Duration;
-
-        // Make an educated guess for a good delay value (Sequence described in the BCM2837
-        // peripherals PDF).
-        //
-        // - According to Wikipedia, the fastest RPi4 clocks around 1.5 GHz.
-        // - The Linux 2837 GPIO driver waits 1 µs between the steps.
-        //
-        // So lets try to be on the safe side and default to 2000 cycles, which would equal 1 µs
-        // would the CPU be clocked at 2 GHz.
 
         // The Linux 2837 GPIO driver waits 1 µs between the steps.
         const DELAY: Duration = Duration::from_micros(1);
@@ -195,7 +187,7 @@ impl GPIOInner {
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
-impl Gpio {
+impl GPIO {
     pub const COMPATIBLE: &'static str = "BCM GPIO";
 
     /// Create an instance.
@@ -220,7 +212,7 @@ impl Gpio {
 //------------------------------------------------------------------------------
 use synchronization::interface::Mutex;
 
-impl driver::interface::DeviceDriver for Gpio {
+impl driver::interface::DeviceDriver for GPIO {
     fn compatible(&self) -> &'static str {
         Self::COMPATIBLE
     }

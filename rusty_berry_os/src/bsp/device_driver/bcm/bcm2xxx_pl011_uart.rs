@@ -9,7 +9,6 @@ use crate::{
     bsp::device_driver::common::MMIODerefWrapper, console, cpu, driver, synchronization,
     synchronization::NullLock,
 };
-
 use core::fmt;
 use tock_registers::{
     interfaces::{Readable, Writeable},
@@ -272,7 +271,7 @@ impl PL011UartInner {
     }
 
     /// Retrieve a character.
-    fn read_char(&mut self, blocking_mode: BlockingMode) -> Option<char> {
+    fn read_char_converting(&mut self, blocking_mode: BlockingMode) -> Option<char> {
         // If RX FIFO is empty,
         if self.registers.FR.matches_all(FR::RXFE::SET) {
             // immediately return in non-blocking mode.
@@ -287,7 +286,12 @@ impl PL011UartInner {
         }
 
         // Read one character.
-        let ret = self.registers.DR.get() as u8 as char;
+        let mut ret = self.registers.DR.get() as u8 as char;
+
+        // Convert carrige return to newline.
+        if ret == '\r' {
+            ret = '\n'
+        }
 
         // Update statistics.
         self.chars_read += 1;
@@ -308,11 +312,6 @@ impl PL011UartInner {
 impl fmt::Write for PL011UartInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for c in s.chars() {
-            // Convert newline to carrige return + newline
-            if c == '\n' {
-                self.write_char('\r');
-            }
-
             self.write_char(c);
         }
 
@@ -363,7 +362,7 @@ impl console::interface::Write for PL011Uart {
         self.inner.lock(|inner| inner.write_char(c));
     }
 
-    fn write_fmt(&self, args: fmt::Arguments) -> fmt::Result {
+    fn write_fmt(&self, args: core::fmt::Arguments) -> fmt::Result {
         // Fully qualified syntax for the call to `core::fmt::Write::write_fmt()` to increase
         // readability.
         self.inner.lock(|inner| fmt::Write::write_fmt(inner, args))
@@ -378,14 +377,14 @@ impl console::interface::Write for PL011Uart {
 impl console::interface::Read for PL011Uart {
     fn read_char(&self) -> char {
         self.inner
-            .lock(|inner| inner.read_char(BlockingMode::Blocking).unwrap())
+            .lock(|inner| inner.read_char_converting(BlockingMode::Blocking).unwrap())
     }
 
     fn clear_rx(&self) {
         // Read from the RX FIFO until it is indicating empty.
         while self
             .inner
-            .lock(|inner| inner.read_char(BlockingMode::NonBlocking))
+            .lock(|inner| inner.read_char_converting(BlockingMode::NonBlocking))
             .is_some()
         {}
     }
