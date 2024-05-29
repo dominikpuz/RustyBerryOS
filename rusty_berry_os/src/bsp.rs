@@ -1,6 +1,6 @@
 //! Conditional reexporting of Board Support Packages.
 
-mod device_driver;
+pub mod device_driver;
 mod raspberrypi;
 
 #[allow(unused_imports)]
