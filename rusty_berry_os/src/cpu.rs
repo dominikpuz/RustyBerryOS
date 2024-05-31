@@ -5,6 +5,7 @@
 mod arch_cpu;
 
 mod boot;
+pub mod smp;
 
 // Re-export the `arch_cpu` functions and types.
 pub use arch_cpu::{nop, wait_forever};

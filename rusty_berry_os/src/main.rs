@@ -11,12 +11,12 @@
 
 #![allow(clippy::upper_case_acronyms)]
 #![allow(incomplete_features)]
-#![allow(internal_features)]
 #![feature(asm_const)]
 #![feature(const_option)]
 #![feature(core_intrinsics)]
 #![feature(format_args_nl)]
 #![feature(int_roundings)]
+#![feature(nonzero_min_max)]
 #![feature(panic_info_message)]
 #![feature(trait_alias)]
 #![feature(unchecked_math)]
@@ -34,6 +34,7 @@ mod panic_wait;
 mod print;
 mod synchronization;
 mod time;
+mod state;
 
 /// Early init code.
 ///
@@ -59,23 +60,29 @@ unsafe fn kernel_init() -> ! {
     }
 
     // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // println! is usable from here on.
+    driver::driver_manager().init_drivers_and_irqs();
+
+    // Unmask interrupts on the boot CPU core.
+    exception::asynchronous::local_irq_unmask();
+
+    // Announce conclusion of the kernel_init() phase.
+    state::state_manager().transition_to_single_core_main();
 
     // Transition from unsafe to safe.
     kernel_main()
 }
+/// Version of the kernel.
+pub fn version() -> &'static str {
+    concat!(
+    env!("CARGO_PKG_NAME"),
+    " version ",
+    env!("CARGO_PKG_VERSION")
+    )
+}
 
 /// The main function running after the early init.
 fn kernel_main() -> ! {
-    use console::console;
-    use core::time::Duration;
-
-    info!(
-        "{} version {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION")
-    );
+    info!("{}", version());
     info!("Booting on: {}", bsp::board_name());
 
     info!("MMU online. Special regions:");
@@ -95,37 +102,9 @@ fn kernel_main() -> ! {
     info!("Drivers loaded:");
     driver::driver_manager().enumerate();
 
-    info!("Timer test, spinning for 1 second");
-    time::time_manager().spin_for(Duration::from_secs(1));
+    info!("Registered IRQ handlers:");
+    exception::asynchronous::irq_manager().print_handler();
 
-    // Cause an exception by accessing a virtual address for which no translation was set up. This
-    // code accesses the address 8 GiB, which is outside the mapped address space.
-    //
-    // For demo purposes, the exception handler will catch the faulting 8 GiB address and allow
-    // execution to continue.
-    info!("");
-    info!("Trying to read from address 8 GiB...");
-    let mut big_addr: u64 = 8 * 1024 * 1024 * 1024;
-    unsafe { core::ptr::read_volatile(big_addr as *mut u64) };
-
-    info!("************************************************");
-    info!("Whoa! We recovered from a synchronous exception!");
-    info!("************************************************");
-    info!("");
-    info!("Let's try again");
-
-    // Now use address 9 GiB. The exception handler won't forgive us this time.
-    info!("Trying to read from address 9 GiB...");
-    big_addr = 9 * 1024 * 1024 * 1024;
-    unsafe { core::ptr::read_volatile(big_addr as *mut u64) };
-
-    // Will never reach here in this tutorial.
     info!("Echoing input now");
-
-    // Discard any spurious received characters before going into echo mode.
-    console().clear_rx();
-    loop {
-        let c = console().read_char();
-        console().write_char(c);
-    }
+    cpu::wait_forever();
 }
