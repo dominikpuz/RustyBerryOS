@@ -63,6 +63,13 @@ pub struct MMIODescriptor {
 // PageAddress
 //------------------------------------------------------------------------------
 impl<ATYPE: AddressType> PageAddress<ATYPE> {
+    /// The largest value that can be represented by this type.
+
+    #[allow(dead_code)]
+    pub const MAX: Self = PageAddress {
+        inner: Address::new(usize::MAX).align_down_page(),
+    };
+
     /// Unwraps the value.
     pub fn into_inner(self) -> Address<ATYPE> {
         self.inner
@@ -148,7 +155,7 @@ impl<ATYPE: AddressType> MemoryRegion<ATYPE> {
             end_exclusive,
         }
     }
-
+    #[allow(dead_code)]
     fn as_range(&self) -> Range<PageAddress<ATYPE>> {
         self.into_iter()
     }
