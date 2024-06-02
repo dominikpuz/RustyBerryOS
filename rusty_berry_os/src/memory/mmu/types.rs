@@ -169,6 +169,7 @@ impl<ATYPE: AddressType> MemoryRegion<ATYPE> {
     }
 
     /// Returns the exclusive end page address.
+    #[allow(dead_code)]
     pub fn end_inclusive_page_addr(&self) -> PageAddress<ATYPE> {
         self.end_exclusive.checked_offset(-1).unwrap()
     }
@@ -181,6 +182,7 @@ impl<ATYPE: AddressType> MemoryRegion<ATYPE> {
     }
 
     /// Checks if there is an overlap with another memory region.
+    #[allow(dead_code)]
     pub fn overlaps(&self, other_region: &Self) -> bool {
         let self_range = self.as_range();
 
