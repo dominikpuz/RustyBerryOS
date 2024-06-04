@@ -66,7 +66,6 @@ pub(super) mod map {
         pub const PL011_UART_START:    usize = START + UART_OFFSET;
         pub const END_INCLUSIVE:       usize =         0x4000_FFFF;
     }
-
 }
 
 //--------------------------------------------------------------------------------------------------
