@@ -11,12 +11,12 @@
 
 #![allow(clippy::upper_case_acronyms)]
 #![allow(incomplete_features)]
-#![allow(internal_features)]
 #![feature(asm_const)]
 #![feature(const_option)]
 #![feature(core_intrinsics)]
 #![feature(format_args_nl)]
 #![feature(int_roundings)]
+#![feature(nonzero_min_max)]
 #![feature(panic_info_message)]
 #![feature(trait_alias)]
 #![feature(unchecked_math)]
@@ -34,6 +34,7 @@ mod panic_wait;
 mod print;
 mod synchronization;
 mod time;
+mod state;
 
 /// Early init code.
 ///
@@ -47,6 +48,8 @@ mod time;
 unsafe fn kernel_init() -> ! {
     use memory::mmu::interface::MMU;
 
+    exception::handling_init();
+
     if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
         panic!("MMU: {}", string);
     }
@@ -57,23 +60,29 @@ unsafe fn kernel_init() -> ! {
     }
 
     // Initialize all device drivers.
-    driver::driver_manager().init_drivers();
-    // println! is usable from here on.
+    driver::driver_manager().init_drivers_and_irqs();
+
+    // Unmask interrupts on the boot CPU core.
+    exception::asynchronous::local_irq_unmask();
+
+    // Announce conclusion of the kernel_init() phase.
+    state::state_manager().transition_to_single_core_main();
 
     // Transition from unsafe to safe.
     kernel_main()
 }
+/// Version of the kernel.
+pub fn version() -> &'static str {
+    concat!(
+    env!("CARGO_PKG_NAME"),
+    " version ",
+    env!("CARGO_PKG_VERSION")
+    )
+}
 
 /// The main function running after the early init.
 fn kernel_main() -> ! {
-    use console::{console, interface::Write};
-    use core::time::Duration;
-
-    info!(
-        "{} version {}",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION")
-    );
+    info!("{}", version());
     info!("Booting on: {}", bsp::board_name());
 
     info!("MMU online. Special regions:");
@@ -93,22 +102,9 @@ fn kernel_main() -> ! {
     info!("Drivers loaded:");
     driver::driver_manager().enumerate();
 
-    info!("Timer test, spinning for 1 second");
-    time::time_manager().spin_for(Duration::from_secs(1));
-
-    let remapped_uart = unsafe { bsp::device_driver::PL011Uart::new(0x1FFF_1000) };
-    writeln!(
-        remapped_uart,
-        "[     !!!    ] Writing through the remapped UART at 0x1FFF_1000"
-    )
-        .unwrap();
+    info!("Registered IRQ handlers:");
+    exception::asynchronous::irq_manager().print_handler();
 
     info!("Echoing input now");
-
-    // Discard any spurious received characters before going into echo mode.
-    console().clear_rx();
-    loop {
-        let c = console().read_char();
-        console().write_char(c);
-    }
+    cpu::wait_forever();
 }
