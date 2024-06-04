@@ -24,9 +24,6 @@ static mut GPIO: MaybeUninit<device_driver::GPIO> = MaybeUninit::uninit();
 static mut INTERRUPT_CONTROLLER: MaybeUninit<device_driver::InterruptController> =
     MaybeUninit::uninit();
 
-#[cfg(feature = "bsp_rpi4")]
-static mut INTERRUPT_CONTROLLER: MaybeUninit<device_driver::GICv2> = MaybeUninit::uninit();
-
 //--------------------------------------------------------------------------------------------------
 // Private Code
 //--------------------------------------------------------------------------------------------------

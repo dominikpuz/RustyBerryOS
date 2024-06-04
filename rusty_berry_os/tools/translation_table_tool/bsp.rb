@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Raspberry Pi 3 + 4
+# Raspberry Pi 3
 class RaspberryPi
     attr_reader :kernel_granule, :kernel_virt_addr_space_size, :kernel_virt_start_addr
 
@@ -35,8 +35,6 @@ class RaspberryPi
         x = case BSP_TYPE
             when :rpi3
                 x[0]
-            when :rpi4
-                x[1]
             else
                 raise
             end
