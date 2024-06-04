@@ -61,7 +61,6 @@ unsafe fn kernel_init() -> ! {
     driver::driver_manager().init_drivers_and_irqs();
 
     bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
-
     // Unmask interrupts on the boot CPU core.
     exception::asynchronous::local_irq_unmask();
 
