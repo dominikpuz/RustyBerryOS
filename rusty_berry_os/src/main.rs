@@ -15,9 +15,12 @@
 #![feature(const_option)]
 #![feature(core_intrinsics)]
 #![feature(format_args_nl)]
+#![feature(generic_const_exprs)]
 #![feature(int_roundings)]
+#![feature(is_sorted)]
 #![feature(nonzero_min_max)]
 #![feature(panic_info_message)]
+#![feature(step_trait)]
 #![feature(trait_alias)]
 #![feature(unchecked_math)]
 #![no_main]
@@ -38,21 +41,16 @@ mod state;
 
 /// Early init code.
 ///
+/// When this code runs, virtual memory is already enabled.
+///
 /// # Safety
 ///
 /// - Only a single core must be active and running this function.
-/// - The init calls in this function must appear in the correct order:
-///     - MMU + Data caching must be activated at the earliest. Without it, any atomic operations,
-///       e.g. the yet-to-be-introduced spinlocks in the device drivers (which currently employ
-///       NullLocks instead of spinlocks), will fail to work (properly) on the RPi SoCs.
+/// - Printing will not work until the respective driver's MMIO is remapped.
+#[no_mangle]
 unsafe fn kernel_init() -> ! {
-    use memory::mmu::interface::MMU;
-
     exception::handling_init();
-
-    if let Err(string) = memory::mmu::mmu().enable_mmu_and_caching() {
-        panic!("MMU: {}", string);
-    }
+    memory::init();
 
     // Initialize the BSP driver subsystem.
     if let Err(x) = bsp::driver::init() {
@@ -62,6 +60,7 @@ unsafe fn kernel_init() -> ! {
     // Initialize all device drivers.
     driver::driver_manager().init_drivers_and_irqs();
 
+    bsp::memory::mmu::kernel_add_mapping_records_for_precomputed();
     // Unmask interrupts on the boot CPU core.
     exception::asynchronous::local_irq_unmask();
 
@@ -85,8 +84,8 @@ fn kernel_main() -> ! {
     info!("{}", version());
     info!("Booting on: {}", bsp::board_name());
 
-    info!("MMU online. Special regions:");
-    bsp::memory::mmu::virt_mem_layout().print_layout();
+    info!("MMU online:");
+    memory::mmu::kernel_print_mappings();
 
     let (_, privilege_level) = exception::current_privilege_level();
     info!("Current privilege level: {}", privilege_level);

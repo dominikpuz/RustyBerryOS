@@ -11,7 +11,7 @@
 
 use crate::{
     bsp, memory,
-    memory::mmu::{translation_table::KernelTranslationTable, TranslationGranule},
+    memory::{mmu::TranslationGranule, Address, Physical},
 };
 use aarch64_cpu::{asm::barrier, registers::*};
 use core::intrinsics::unlikely;
@@ -42,13 +42,6 @@ pub mod mair {
 // Global instances
 //--------------------------------------------------------------------------------------------------
 
-/// The kernel translation tables.
-///
-/// # Safety
-///
-/// - Supposed to land in `.bss`. Therefore, ensure that all initial member values boil down to "0".
-static mut KERNEL_TABLES: KernelTranslationTable = KernelTranslationTable::new();
-
 static MMU: MemoryManagementUnit = MemoryManagementUnit;
 
 //--------------------------------------------------------------------------------------------------
@@ -69,6 +62,7 @@ impl<const AS_SIZE: usize> memory::mmu::AddressSpace<AS_SIZE> {
 
 impl MemoryManagementUnit {
     /// Setup function for the MAIR_EL1 register.
+    #[inline(always)]
     fn set_up_mair(&self) {
         // Define the memory types being mapped.
         MAIR_EL1.write(
@@ -82,20 +76,21 @@ impl MemoryManagementUnit {
     }
 
     /// Configure various settings of stage 1 of the EL1 translation regime.
+    #[inline(always)]
     fn configure_translation_control(&self) {
-        let t0sz = (64 - bsp::memory::mmu::KernelAddrSpace::SIZE_SHIFT) as u64;
+        let t1sz = (64 - bsp::memory::mmu::KernelVirtAddrSpace::SIZE_SHIFT) as u64;
 
         TCR_EL1.write(
-            TCR_EL1::TBI0::Used
+            TCR_EL1::TBI1::Used
                 + TCR_EL1::IPS::Bits_40
-                + TCR_EL1::TG0::KiB_64
-                + TCR_EL1::SH0::Inner
-                + TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-                + TCR_EL1::IRGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-                + TCR_EL1::EPD0::EnableTTBR0Walks
-                + TCR_EL1::A1::TTBR0
-                + TCR_EL1::T0SZ.val(t0sz)
-                + TCR_EL1::EPD1::DisableTTBR1Walks,
+                + TCR_EL1::TG1::KiB_64
+                + TCR_EL1::SH1::Inner
+                + TCR_EL1::ORGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+                + TCR_EL1::IRGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+                + TCR_EL1::EPD1::EnableTTBR1Walks
+                + TCR_EL1::A1::TTBR1
+                + TCR_EL1::T1SZ.val(t1sz)
+                + TCR_EL1::EPD0::DisableTTBR0Walks,
         );
     }
 }
@@ -115,7 +110,10 @@ pub fn mmu() -> &'static impl memory::mmu::interface::MMU {
 use memory::mmu::MMUEnableError;
 
 impl memory::mmu::interface::MMU for MemoryManagementUnit {
-    unsafe fn enable_mmu_and_caching(&self) -> Result<(), MMUEnableError> {
+    unsafe fn enable_mmu_and_caching(
+        &self,
+        phys_tables_base_addr: Address<Physical>,
+    ) -> Result<(), MMUEnableError> {
         if unlikely(self.is_enabled()) {
             return Err(MMUEnableError::AlreadyEnabled);
         }
@@ -130,13 +128,8 @@ impl memory::mmu::interface::MMU for MemoryManagementUnit {
         // Prepare the memory attribute indirection register.
         self.set_up_mair();
 
-        // Populate translation tables.
-        KERNEL_TABLES
-            .populate_tt_entries()
-            .map_err(MMUEnableError::Other)?;
-
         // Set the "Translation Table Base Register".
-        TTBR0_EL1.set_baddr(KERNEL_TABLES.phys_base_address());
+        TTBR1_EL1.set_baddr(phys_tables_base_addr.as_usize() as u64);
 
         self.configure_translation_control();
 

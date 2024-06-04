@@ -1,28 +1,23 @@
 //! Memory Management Unit.
-//!
-//! In order to decouple `BSP` and `arch` parts of the MMU code (to keep them pluggable), this file
-//! provides types for composing an architecture-agnostic description of the kernel's virtual memory
-//! layout.
-//!
-//! The `BSP` provides such a description through the `bsp::memory::mmu::virt_mem_layout()`
-//! function.
-//!
-//! The `MMU` driver of the `arch` code uses `bsp::memory::mmu::virt_mem_layout()` to compile and
-//! install respective translation tables.
 
 #[cfg(target_arch = "aarch64")]
 #[path = "../_arch/aarch64/memory/mmu.rs"]
 mod arch_mmu;
 
+mod mapping_record;
+mod page_alloc;
 mod translation_table;
+mod types;
 
-use crate::common;
-use core::{fmt, ops::RangeInclusive};
+use crate::{
+    bsp,
+    memory::{Address, Physical, Virtual},
+    synchronization::{self, interface::Mutex},
+    warn,
+};
+use core::{fmt, num::NonZeroUsize};
 
-//--------------------------------------------------------------------------------------------------
-// Architectural Public Reexports
-//--------------------------------------------------------------------------------------------------
-pub use arch_mmu::mmu;
+pub use types::*;
 
 //--------------------------------------------------------------------------------------------------
 // Public Definitions
@@ -42,13 +37,15 @@ pub mod interface {
 
     /// MMU functions.
     pub trait MMU {
-        /// Called by the kernel during early init. Supposed to take the translation tables from the
-        /// `BSP`-supplied `virt_mem_layout()` and install/activate them for the respective MMU.
+        /// Turns on the MMU for the first time and enables data and instruction caching.
         ///
         /// # Safety
         ///
         /// - Changes the HW's global state.
-        unsafe fn enable_mmu_and_caching(&self) -> Result<(), MMUEnableError>;
+        unsafe fn enable_mmu_and_caching(
+            &self,
+            phys_tables_base_addr: Address<Physical>,
+        ) -> Result<(), MMUEnableError>;
 
         /// Returns true if the MMU is enabled, false otherwise.
         fn is_enabled(&self) -> bool;
@@ -61,56 +58,56 @@ pub struct TranslationGranule<const GRANULE_SIZE: usize>;
 /// Describes properties of an address space.
 pub struct AddressSpace<const AS_SIZE: usize>;
 
-/// Architecture agnostic translation types.
-#[allow(missing_docs)]
-#[allow(dead_code)]
-#[derive(Copy, Clone)]
-pub enum Translation {
-    Identity,
-    Offset(usize),
+/// Intended to be implemented for [`AddressSpace`].
+pub trait AssociatedTranslationTable {
+    /// A translation table whose address range is:
+    ///
+    /// [u64::MAX, (u64::MAX - AS_SIZE) + 1]
+    type TableStartFromTop;
+
+    /// A translation table whose address range is:
+    ///
+    /// [AS_SIZE - 1, 0]
+    type TableStartFromBottom;
 }
 
-/// Architecture agnostic memory attributes.
-#[allow(missing_docs)]
-#[derive(Copy, Clone)]
-pub enum MemAttributes {
-    CacheableDRAM,
-    Device,
+//--------------------------------------------------------------------------------------------------
+// Private Code
+//--------------------------------------------------------------------------------------------------
+use interface::MMU;
+use synchronization::interface::ReadWriteEx;
+use translation_table::interface::TranslationTable;
+
+/// Map a region in the kernel's translation tables.
+///
+/// No input checks done, input is passed through to the architectural implementation.
+///
+/// # Safety
+///
+/// - See `map_at()`.
+/// - Does not prevent aliasing.
+unsafe fn kernel_map_at_unchecked(
+    name: &'static str,
+    virt_region: &MemoryRegion<Virtual>,
+    phys_region: &MemoryRegion<Physical>,
+    attr: &AttributeFields,
+) -> Result<(), &'static str> {
+    bsp::memory::mmu::kernel_translation_tables()
+        .write(|tables| tables.map_at(virt_region, phys_region, attr))?;
+
+    kernel_add_mapping_record(name, virt_region, phys_region, attr);
+
+    Ok(())
 }
 
-/// Architecture agnostic access permissions.
-#[allow(missing_docs)]
-#[derive(Copy, Clone)]
-pub enum AccessPermissions {
-    ReadOnly,
-    ReadWrite,
-}
-
-/// Collection of memory attributes.
-#[allow(missing_docs)]
-#[derive(Copy, Clone)]
-pub struct AttributeFields {
-    pub mem_attributes: MemAttributes,
-    pub acc_perms: AccessPermissions,
-    pub execute_never: bool,
-}
-
-/// Architecture agnostic descriptor for a memory range.
-#[allow(missing_docs)]
-pub struct TranslationDescriptor {
-    pub name: &'static str,
-    pub virtual_range: fn() -> RangeInclusive<usize>,
-    pub physical_range_translation: Translation,
-    pub attribute_fields: AttributeFields,
-}
-
-/// Type for expressing the kernel's virtual memory layout.
-pub struct KernelVirtualLayout<const NUM_SPECIAL_RANGES: usize> {
-    /// The last (inclusive) address of the address space.
-    max_virt_addr_inclusive: usize,
-
-    /// Array of descriptors for non-standard (normal cacheable DRAM) memory regions.
-    inner: [TranslationDescriptor; NUM_SPECIAL_RANGES],
+/// Try to translate a kernel virtual address to a physical address.
+///
+/// Will only succeed if there exists a valid mapping for the input address.
+fn try_kernel_virt_addr_to_phys_addr(
+    virt_addr: Address<Virtual>,
+) -> Result<Address<Physical>, &'static str> {
+    bsp::memory::mmu::kernel_translation_tables()
+        .read(|tables| tables.try_virt_addr_to_phys_addr(virt_addr))
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -129,6 +126,9 @@ impl fmt::Display for MMUEnableError {
 impl<const GRANULE_SIZE: usize> TranslationGranule<GRANULE_SIZE> {
     /// The granule's size.
     pub const SIZE: usize = Self::size_checked();
+
+    /// The granule's mask.
+    pub const MASK: usize = Self::SIZE - 1;
 
     /// The granule's shift, aka log2(size).
     pub const SHIFT: usize = Self::SIZE.trailing_zeros() as usize;
@@ -157,93 +157,105 @@ impl<const AS_SIZE: usize> AddressSpace<AS_SIZE> {
     }
 }
 
-impl Default for AttributeFields {
-    fn default() -> AttributeFields {
-        AttributeFields {
-            mem_attributes: MemAttributes::CacheableDRAM,
-            acc_perms: AccessPermissions::ReadWrite,
-            execute_never: true,
-        }
+/// Query the BSP for the reserved virtual addresses for MMIO remapping and initialize the kernel's
+/// MMIO VA allocator with it.
+pub fn kernel_init_mmio_va_allocator() {
+    let region = bsp::memory::mmu::virt_mmio_remap_region();
+
+    page_alloc::kernel_mmio_va_allocator().lock(|allocator| allocator.init(region));
+}
+
+/// Add an entry to the mapping info record.
+pub fn kernel_add_mapping_record(
+    name: &'static str,
+    virt_region: &MemoryRegion<Virtual>,
+    phys_region: &MemoryRegion<Physical>,
+    attr: &AttributeFields,
+) {
+    if let Err(x) = mapping_record::kernel_add(name, virt_region, phys_region, attr) {
+        warn!("{}", x);
     }
 }
 
-/// Human-readable output of a TranslationDescriptor.
-impl fmt::Display for TranslationDescriptor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Call the function to which self.range points, and dereference the result, which causes
-        // Rust to copy the value.
-        let start = *(self.virtual_range)().start();
-        let end = *(self.virtual_range)().end();
-        let size = end - start + 1;
+/// MMIO remapping in the kernel translation tables.
+///
+/// Typically used by device drivers.
+///
+/// # Safety
+///
+/// - Same as `kernel_map_at_unchecked()`, minus the aliasing part.
+pub unsafe fn kernel_map_mmio(
+    name: &'static str,
+    mmio_descriptor: &MMIODescriptor,
+) -> Result<Address<Virtual>, &'static str> {
+    let phys_region = MemoryRegion::from(*mmio_descriptor);
+    let offset_into_start_page = mmio_descriptor.start_addr().offset_into_page();
 
-        let (size, unit) = common::size_human_readable_ceil(size);
-
-        let attr = match self.attribute_fields.mem_attributes {
-            MemAttributes::CacheableDRAM => "C",
-            MemAttributes::Device => "Dev",
+    // Check if an identical region has been mapped for another driver. If so, reuse it.
+    let virt_addr = if let Some(addr) =
+        mapping_record::kernel_find_and_insert_mmio_duplicate(mmio_descriptor, name)
+    {
+        addr
+        // Otherwise, allocate a new region and map it.
+    } else {
+        let num_pages = match NonZeroUsize::new(phys_region.num_pages()) {
+            None => return Err("Requested 0 pages"),
+            Some(x) => x,
         };
 
-        let acc_p = match self.attribute_fields.acc_perms {
-            AccessPermissions::ReadOnly => "RO",
-            AccessPermissions::ReadWrite => "RW",
-        };
+        let virt_region =
+            page_alloc::kernel_mmio_va_allocator().lock(|allocator| allocator.alloc(num_pages))?;
 
-        let xn = if self.attribute_fields.execute_never {
-            "PXN"
-        } else {
-            "PX"
-        };
+        kernel_map_at_unchecked(
+            name,
+            &virt_region,
+            &phys_region,
+            &AttributeFields {
+                mem_attributes: MemAttributes::Device,
+                acc_perms: AccessPermissions::ReadWrite,
+                execute_never: true,
+            },
+        )?;
 
-        write!(
-            f,
-            "      {:#010x} - {:#010x} | {: >3} {} | {: <3} {} {: <3} | {}",
-            start, end, size, unit, attr, acc_p, xn, self.name
-        )
-    }
+        virt_region.start_addr()
+    };
+
+    Ok(virt_addr + offset_into_start_page)
 }
 
-impl<const NUM_SPECIAL_RANGES: usize> KernelVirtualLayout<{ NUM_SPECIAL_RANGES }> {
-    /// Create a new instance.
-    pub const fn new(max: usize, layout: [TranslationDescriptor; NUM_SPECIAL_RANGES]) -> Self {
-        Self {
-            max_virt_addr_inclusive: max,
-            inner: layout,
-        }
-    }
+/// Try to translate a kernel virtual page address to a physical page address.
+///
+/// Will only succeed if there exists a valid mapping for the input page.
+pub fn try_kernel_virt_page_addr_to_phys_page_addr(
+    virt_page_addr: PageAddress<Virtual>,
+) -> Result<PageAddress<Physical>, &'static str> {
+    bsp::memory::mmu::kernel_translation_tables()
+        .read(|tables| tables.try_virt_page_addr_to_phys_page_addr(virt_page_addr))
+}
 
-    /// For a virtual address, find and return the physical output address and corresponding
-    /// attributes.
-    ///
-    /// If the address is not found in `inner`, return an identity mapped default with normal
-    /// cacheable DRAM attributes.
-    pub fn virt_addr_properties(
-        &self,
-        virt_addr: usize,
-    ) -> Result<(usize, AttributeFields), &'static str> {
-        if virt_addr > self.max_virt_addr_inclusive {
-            return Err("Address out of range");
-        }
+/// Try to get the attributes of a kernel page.
+///
+/// Will only succeed if there exists a valid mapping for the input page.
+pub fn try_kernel_page_attributes(
+    virt_page_addr: PageAddress<Virtual>,
+) -> Result<AttributeFields, &'static str> {
+    bsp::memory::mmu::kernel_translation_tables()
+        .read(|tables| tables.try_page_attributes(virt_page_addr))
+}
 
-        for i in self.inner.iter() {
-            if (i.virtual_range)().contains(&virt_addr) {
-                let output_addr = match i.physical_range_translation {
-                    Translation::Identity => virt_addr,
-                    Translation::Offset(a) => a + (virt_addr - (i.virtual_range)().start()),
-                };
+/// Human-readable print of all recorded kernel mappings.
+pub fn kernel_print_mappings() {
+    mapping_record::kernel_print()
+}
 
-                return Ok((output_addr, i.attribute_fields));
-            }
-        }
-
-        Ok((virt_addr, AttributeFields::default()))
-    }
-
-    /// Print the memory layout.
-    pub fn print_layout(&self) {
-        use crate::info;
-
-        for i in self.inner.iter() {
-            info!("{}", i);
-        }
-    }
+/// Enable the MMU and data + instruction caching.
+///
+/// # Safety
+///
+/// - Crucial function during kernel init. Changes the the complete memory view of the processor.
+#[inline(always)]
+pub unsafe fn enable_mmu_and_caching(
+    phys_tables_base_addr: Address<Physical>,
+) -> Result<(), MMUEnableError> {
+    arch_mmu::mmu().enable_mmu_and_caching(phys_tables_base_addr)
 }
